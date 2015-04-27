@@ -32,22 +32,26 @@ def main():
         if len(fileList) == 0:
             print("The diff is empty")
             continue
+        diffHasBeenShowed = False
         while True:
-            print(formatListColor(fileList, bcolors.WARNING, alreadySeen))
+            if not diffHasBeenShowed: 
+                print(formatListColor(fileList, bcolors.WARNING, alreadySeen))
+            diffHasBeenShowed = False
             goToExternal = False
             while True:
-                choice = raw_input("q for quit\n<num> for choose the file for diff\nr for re-enter commits or re-choose a difftool\nl for list the files again: ")
+                choice = raw_input("q for quit\n<num> for choose the file for diff\nr for re-enter commits or re-choose a difftool\nl for list the files again\n" + bcolors.BOLD + "You choice: " + bcolors.ENDC)
                 if choice == "q":
                     return 
                 elif choice == "r":
                     goToExternal = True
                     break
                 elif choice == "l":
-                    print(formatList(fileList))
+                    print(formatListColor(fileList, bcolors.WARNING, alreadySeen))
                 elif choice != "" and int(choice) > 0 and int(choice) <= len(fileList):
                     choosedFile = fileList[int(choice)] 
                     choosedFile = gitRootDir[:-1] + "/" +  choosedFile
                     showDiff(choosedFile, firstCommit, isConsoleDiffTool, secondCommit)
+                    diffHasBeenShowed = True
                     alreadySeen[int(choice)] = True
                     break
                 else:
@@ -56,21 +60,17 @@ def main():
                 break
 
 def getCommitForObject(obj):
-    """
-    Temporary just a stub
-    """
-    out, err, ret = runCommand("git rev-parse " + obj, False)
+    #out, err, ret = runCommand("git rev-parse " + obj, False)
     return obj
-    if ret != 0:
-        return None
-    else:
-        return out
-
+    
 def getCommitFromList(obj):
+    storeObj = obj
     first = True
     while True:
         if not first:
-            newObj = raw_input("Please, enter the object name(old by default): ") or obj
+            newObj = raw_input("Please, enter the object name(" + storeObj + " by default): ") or storeObj
+            if isValidObject(newObj):
+                return newObj
             obj = newObj
         tagList = generateList("git tag --list *" + obj + "*")
         branchList = generateList("git branch --list *" + obj + "*")
@@ -109,12 +109,12 @@ def getObject(firstCommit, default = "HEAD"):
         message = "Please, enter the git object (%s by default): " % default
     else:
         default = firstCommit + "~1"
-        message = "Please, enter the git object (%s by default): " % (firstCommit + "~1")
+        message = "Please, enter the git object (%s by default): " % (default)
     inObject = raw_input(message) or default
     if isValidObject(inObject):
         commit = inObject
     else:
-        commit = getCommitFromList(inObject)
+        commit = getCommitFromList(default)
     return commit 
         
         
@@ -151,18 +151,19 @@ def showDiff(filename, commit, inConsole, secondCommit=""):
         raise Exception("Incorrect filename or commit")
 
 def formatList(fileList):
-    return "\n".join("%d: %s" % (num, filename) for (num, filename) in fileList.items()) 
+    return bcolors.BOLD + "\n".join("%d: %s" % (num, filename) for (num, filename) in fileList.items()) + bcolors.ENDC 
 
 def formatListColor(fileList, color, seenList):
-    out = ""
+    out = bcolors.BOLD 
     for num, filename in fileList.items():
         if seenList.has_key(num):
             out += color 
         out += "%d: %s" % (num, filename) 
         if seenList.has_key(num):
             out += bcolors.ENDC
+            out += bcolors.BOLD
         out += "\n"
-    return out[:-1] #remove last \n
+    return out[:-1] + bcolors.ENDC #remove last \n
 
 
 def generateList(command):
