@@ -63,8 +63,7 @@ def getCommitForObject(obj):
     #out, err, ret = runCommand("git rev-parse " + obj, False)
     return obj
     
-def getCommitFromList(obj):
-    storeObj = obj
+def getCommitFromList(obj, storeObj):
     first = True
     while True:
         if not first:
@@ -114,7 +113,7 @@ def getObject(firstCommit, default = "HEAD"):
     if isValidObject(inObject):
         commit = inObject
     else:
-        commit = getCommitFromList(default)
+        commit = getCommitFromList(inObject, default)
     return commit 
         
         
