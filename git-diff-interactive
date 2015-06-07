@@ -1,6 +1,8 @@
 #!/usr/bin/python
 
 import subprocess
+import sys
+import os
 
 class bcolors:
     HEADER = '\033[95m'
@@ -15,151 +17,175 @@ class bcolors:
 def printCol(text, color):
     print(color + text + bcolors.ENDC)
 
-def main():
-    gitRootDir, err, ret = runCommand("git rev-parse --show-toplevel", None)
-    if ret:
-        print("No git repo found")
-        return
-    while True:
-        firstCommit = getObject(None)
-        secondCommit = getObject(firstCommit, firstCommit)
-        isConsoleDiffTool = getDiffToolChoice()
-        alreadySeen = {}
-        fileList = generateList(getListCommand(firstCommit, secondCommit))
-        if fileList == None:
-            print("Error while generating a list")
-            return
-        if len(fileList) == 0:
-            print("The diff is empty")
-            continue
-        diffHasBeenShowed = False
-        while True:
-            if not diffHasBeenShowed: 
-                print(formatListColor(fileList, bcolors.WARNING, alreadySeen))
-            diffHasBeenShowed = False
-            goToExternal = False
-            while True:
-                choice = raw_input("q for quit\n<num> for choose the file for diff\nr for re-enter commits or re-choose a difftool\nl for list the files again\n" + bcolors.BOLD + "You choice: " + bcolors.ENDC)
-                if choice == "q":
-                    return 
-                elif choice == "r":
-                    goToExternal = True
-                    break
-                elif choice == "l":
-                    print(formatListColor(fileList, bcolors.WARNING, alreadySeen))
-                elif choice != "" and int(choice) > 0 and int(choice) <= len(fileList):
-                    choosedFile = fileList[int(choice)] 
-                    choosedFile = gitRootDir[:-1] + "/" +  choosedFile
-                    showDiff(choosedFile, firstCommit, isConsoleDiffTool, secondCommit)
-                    diffHasBeenShowed = True
-                    alreadySeen[int(choice)] = True
-                    break
-                else:
-                    print("Incorrect choice")
-            if goToExternal:
-                break
-
-def getCommitForObject(obj):
-    #out, err, ret = runCommand("git rev-parse " + obj, False)
-    return obj
-    
-def getCommitFromList(obj, storeObj):
-    first = True
-    while True:
-        if not first:
-            newObj = raw_input("Please, enter the object name(" + storeObj + " by default): ") or storeObj
-            if isValidObject(newObj):
-                return newObj
-            obj = newObj
-        tagList = generateList("git tag --list *" + obj + "*")
-        branchList = generateList("git branch --list *" + obj + "*")
-        if tagList == None or branchList == None:
-            print("Error, while generating a list of objects")
-            continue
-        else:
-            if len(tagList) != 0:
-                for key, value in branchList.items():
-                    branchList[key + len(tagList.keys())] = value
-                    del branchList[key]
-            for key, value in branchList.items():
-                if branchList[key][0] == "*":
-                    branchList[key] = branchList[key].split(" ")[1]
-            tagList.update(branchList)
-            fullList = tagList
-            if len(fullList) == 1:
-                print("Object: " + fullList[1])
-                return getCommitForObject(fullList[1]);
-            elif len(fullList) == 0:
-                first = False
-                print("Empty list of objects")    
-            else:
-                print(formatList(fullList)) 
-                while True:
-                    choice = int(raw_input("Please choose the object from the list: "))
-                    if choice > 0 and choice < len(fullList):
-                        print("You choose " + fullList[choice]) 
-                        return getCommitForObject(fullList[choice])
-                    else:
-                        print("Incorrect choice")
-                        first = False
-
-def enumerateList(sequence, start=0):
+def enumerate(sequence, start=0):
     n = start
     for elem in sequence:
         yield n, elem
         n += 1
-        
-def getObject(firstCommit, default = "HEAD"):
-    if firstCommit == None:
-        message = "Please, enter the git object (%s by default): " % default
-    else:
-        default = firstCommit + "~1"
-        message = "Please, enter the git object (%s by default): " % (default)
-    inObject = raw_input(message) or default
-    if isValidObject(inObject):
-        commit = inObject
-    else:
-        commit = getCommitFromList(inObject, default)
-    return commit 
-        
-        
-def getListCommand(firstCommit, secondCommit):
-    return "git diff --name-only " + firstCommit + " " + secondCommit
 
-def getDiffToolChoice():
-    choice = -1
+def printHelp():
+    print("git-diff-interactive [commit] [-s diff-commit] [-c]")
+    print("commit - git object. If no such commit exists then you have to choose from the list")
+    print("diff-commit - git object to which commit will be compared")
+    print("-c - use console diff (git difftool is used by default)")
+    print("-s - diff-commit will be requested. If this option is not used then diff-commit always be commit~1")
+    print("If one of the commits is not exists you have to choose from the list")
+
+def retrieveObjectsFromArgs(args):
+    ignoredArgs = ("-h", "-c", "--help", "-s")
+    commits = [None, None]
+    idx = 0
+    for arg in args[1:]:
+        if not arg in ignoredArgs:
+            commits[idx] = arg
+            idx += 1
+        if idx == 2:
+            break
+    return commits
+
+def run(command, useDifftool):
+    if useDifftool:
+        FNULL = open(os.devnull, "w")
+        p = subprocess.Popen(command, stdout=FNULL, stderr=FNULL, shell=True)
+    else:
+        p = subprocess.Popen(command, shell=True)
+    p.wait()
+        
+def runWithOutput(command):
+    p = subprocess.Popen(command, stdout = subprocess.PIPE, stderr = subprocess.PIPE, shell=True)
+    out, err = p.communicate()
+    return out, err, p.returncode
+
+def getGitRootDir():
+    command = "git rev-parse --show-toplevel"
+    out, err, errcode = runWithOutput(command)
+    if errcode != 0:
+        raise OSError
+    return out
+
+def getTagsAndBranchesList(obj):
+    if obj == None:
+        pObj = ""
+    else:
+        pObj = "*" + obj + "*"
+    tagCommand = "git tag --list " + pObj 
+    branchCommand = "git branch --list " + pObj 
+
+    outList = []
+
+    for command in (tagCommand, branchCommand):
+        out, err, res = runWithOutput(command)
+        if res != 0:
+            raise OSError
+        for tmpOut in out.split("\n")[:-1]:
+            if " " in tmpOut:
+                tmp = tmpOut.split(" ")[1]
+            outList += [tmp]
+
+    return outList
+
+def formatMap(objMap):
+    return bcolors.BOLD + "\n".join("%d: %s" % (num, obj) for (num, obj) in objMap.items()) + bcolors.ENDC 
+
+def getObjFromList(obj, baseObj = None):
+    isFirst = baseObj == None    
+    
     while True:
-        choice = int(raw_input("Please select visual mode for diff:\n1: console diff\n2: difftool\nPlease specify a number: "))
-        if choice == 1:
-            return True
-        elif choice == 2:
-            return False
+        if isFirst:
+            addition = "for the first object"
         else:
-            print("Incorrect input")
+            addition = "for the second object"
 
-def isValidObject(commit):
-    if commit == None:
-        return False
-    out, err, ret = runCommand("git rev-parse --quiet --verify " + commit, False)
+        printCol("Please choose object from the list " + addition +  " :", bcolors.BOLD + bcolors.OKGREEN)
+        if isFirst:
+            objList = ["HEAD"]
+        else:
+            objList = [baseObj + "~1"]
+
+        try:
+            objList += getTagsAndBranchesList(obj)
+        except OSError:
+            printCol("Error while retrieving list of tags and branches", bcolors.FAIL)
+
+        objMap = dict(enumerate(objList, 1))
+        print(formatMap(objMap))
+        
+        while True:
+            printCol("If you want to change the provided object name, please insert 0", bcolors.OKBLUE + bcolors.BOLD)
+            choice = int(raw_input(bcolors.OKBLUE + bcolors.BOLD + "Or please choose the object from the list: " + bcolors.ENDC))
+            if choice > 0 and choice <= len(objList):
+                return objMap[choice]
+            elif choice == 0:
+                obj = raw_input(bcolors.BOLD + bcolors.OKGREEN + "Please provide object name: " + bcolors.ENDC)
+                try:
+                    checkValidCommit(obj)
+                    return obj
+                except OSError:
+                    break
+            else:
+                printCol("Incorrect choice", bcolors.FAIL)
+
+def checkValidCommit(obj):
+    if obj == None:
+        raise OSError
+    command = "git rev-parse --quiet --verify " + obj
+    out, err, retcode = runWithOutput(command)
+    if retcode != 0:
+        raise OSError
+
+def getCommits(args, askForSecond):
+    objects = retrieveObjectsFromArgs(args)
+    commits = [None, None]
+
+    for idx, obj in enumerate(objects):
+        if idx == 1 and not askForSecond:
+            obj = commits[0] + "~1"
+        try:
+            checkValidCommit(obj)
+            commits[idx] = obj
+        except OSError:
+            if idx == 0:
+                commits[idx] = getObjFromList(obj)
+            else:
+                commits[idx] = getObjFromList(obj, commits[0])
+
+    return tuple(commits)
+
+def markFile(choice, alreadySeen):
+    alreadySeen[int(choice)] = True
+
+def initDiff(choice, gitRootDir, useDifftool, filesList):
+    choosedFile = filesList[int(choice)] 
+    choosedFile = gitRootDir[:-1] + "/" +  choosedFile
+    
+    def showDiff(firstCommit, secondCommit):
+        command = "git diff"
+        if useDifftool:
+            command += "tool -y"
+        command += " " + secondCommit + ".." + firstCommit + " " + choosedFile
+        run(command, useDifftool)
+    return showDiff
+
+def getFilesList(firstCommit, secondCommit):
+    command = "git diff --name-only " + firstCommit + " " + secondCommit
+    out, err, ret = runWithOutput(command)
     if ret != 0:
-        return False
-    return True
+        raise OSError
+    return out.split("\n")[:-1]
 
-def showDiff(filename, commit, inConsole, secondCommit=""):
-    command = "git diff"
-    if not inConsole:
-        command += "tool -y"
-    command += " " + commit + " " + secondCommit + " " + filename
-    try:
-        runCommand(command, inConsole)
-    except Exception:
-        raise Exception("Incorrect filename or commit")
+def makeDictFromList(fileslist):
+    result = {}
+    for idx, value in enumerate(fileslist, 1):
+        result[idx] = value
+    return result
 
 def formatList(fileList):
     return bcolors.BOLD + "\n".join("%d: %s" % (num, filename) for (num, filename) in fileList.items()) + bcolors.ENDC 
 
 def formatListColor(fileList, color, seenList):
-    out = bcolors.BOLD 
+    out = bcolors.BOLD + bcolors.OKGREEN
+    out += "List of changed files\n"
+    out += bcolors.ENDC + bcolors.BOLD
     for num, filename in fileList.items():
         if seenList.has_key(num):
             out += color 
@@ -170,23 +196,51 @@ def formatListColor(fileList, color, seenList):
         out += "\n"
     return out[:-1] + bcolors.ENDC #remove last \n
 
+def mainLoop(firstCommit, secondCommit,gitRootDir,  useDifftool):
+    alreadySeen = {}
+    try:
+        filesList = makeDictFromList(getFilesList(firstCommit, secondCommit))
+    except OSError:
+        printCol("Error while generating list of files", bcolors.FAIL)
+    if len(filesList) == 0:
+        print("The diff is empty", bcolors.WARNING)
+        return 
+    while True:
+        print(formatListColor(filesList, bcolors.WARNING, alreadySeen))
+        while True:
+            questString = bcolors.BOLD + bcolors.OKBLUE + "q for quit\n \
+<num> for choose the file for diff\n \
+l for list the files again\nYou choice: " + bcolors.ENDC
+            choice = raw_input(questString)
+            if choice == "q":
+                return 
+            elif choice == "l":
+                print(formatListColor(filesList, bcolors.WARNING, alreadySeen))
+            elif choice != "" and int(choice) > 0 and int(choice) <= len(filesList):
+                markFile(choice, alreadySeen)
+                showDiff = initDiff(choice, gitRootDir, useDifftool, filesList)
+                showDiff(firstCommit, secondCommit)
+            else:
+                printCol("Incorrect choice", bcolors.FAIL)
 
-def generateList(command):
-    out, err, ret = runCommand(command, False)
-    if ret != 0:
-        return None
-    outList = out.split("\n")[:-1] # the last line is empty
-    return dict(enumerateList(outList, start = 1)) 
-
-def runCommand(command, externalTool):
-    if externalTool:
-        p = subprocess.Popen(command, shell=True)
-        p.wait()
-        return None
-    else:
-        p = subprocess.Popen(command, stdout = subprocess.PIPE, stderr = subprocess.PIPE, shell=True)
-        out, err = p.communicate()
-        return out, err, p.returncode
+def main():
+    args = sys.argv[:]
+    if "-h" in args or "--help" in args:
+        printHelp()
+        return
+    useDifftool = True
+    if "-c" in args:
+        useDifftool = False
+    askForSecond = False
+    if "-s" in args:
+        askForSecond = True
+    try:
+        gitRootDir = getGitRootDir()
+    except OSError:
+        print("No git repo found")
+        return
+    firstCommit, secondCommit = getCommits(args, askForSecond)
+    mainLoop(firstCommit, secondCommit, gitRootDir, useDifftool)
 
 if __name__ == "__main__":
     main()
