@@ -103,6 +103,12 @@ def getCommitFromList(obj, storeObj):
                         print("Incorrect choice")
                         first = False
 
+def enumerateList(sequence, start=0):
+    n = start
+    for elem in sequence:
+        yield n, elem
+        n += 1
+        
 def getObject(firstCommit, default = "HEAD"):
     if firstCommit == None:
         message = "Please, enter the git object (%s by default): " % default
@@ -170,7 +176,7 @@ def generateList(command):
     if ret != 0:
         return None
     outList = out.split("\n")[:-1] # the last line is empty
-    return dict(enumerate(outList, start = 1)) 
+    return dict(enumerateList(outList, start = 1)) 
 
 def runCommand(command, externalTool):
     if externalTool:
