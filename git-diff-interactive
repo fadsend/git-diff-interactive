@@ -63,6 +63,12 @@ def getGitRootDir():
         raise OSError
     return out
 
+def checkIfEmptyString(string):
+    for i in string:
+        if i != "":
+            return False
+    return True
+
 def getTagsAndBranchesList(obj):
     if obj == None:
         pObj = ""
@@ -78,8 +84,15 @@ def getTagsAndBranchesList(obj):
         if res != 0:
             raise OSError
         for tmpOut in out.split("\n")[:-1]:
+            if checkIfEmptyString(tmpOut):
+                continue
             if " " in tmpOut:
-                tmp = tmpOut.split(" ")[1]
+                for i in tmpOut.split(" "):
+                    if i != "" and i != "*":
+                        tmp = i
+                        break
+            else:
+                tmp = tmpOut
             outList += [tmp]
 
     return outList
